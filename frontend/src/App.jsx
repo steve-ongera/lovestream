@@ -12,8 +12,7 @@ import LivePage      from "./pages/LivePage";
 import DatingPage    from "./pages/DatingPage";
 import ProfilePage   from "./pages/ProfilePage";
 import MessagesPage  from "./pages/MessagesPage";
-import LoginPage     from "./pages/LoginPage";
-import RegisterPage  from "./pages/RegisterPage";
+import LoginPage, { RegisterPage } from "./pages/LoginPage";
 
 // ─── Auth Context ─────────────────────────────────────────────────────────
 export const AuthContext = createContext(null);
