@@ -4,20 +4,31 @@ Full-database seed command for the dating/video platform.
 Covers: User, UserPhoto, Category, Tag, Video, VideoView, VideoLike,
         Comment, LiveStream, Match, Conversation, Message,
         Payment, VideoAccess, StreamAccess, Notification
+
+Media files are randomly picked from the local backup directory:
+    Windows path : D:\\static\\admin\\Backup
+    Linux/WSL    : /mnt/d/static/admin/Backup   (adjust if needed)
+
 Run:
     python manage.py seed_data
     python manage.py seed_data --clear   # wipe then re-seed
+    python manage.py seed_data --media-root "D:/static/admin/Backup"
 """
 
+import os
 import uuid
 import random
 import decimal
-from datetime import timedelta
+import shutil
+from pathlib import Path
+from datetime import timedelta, date
 
 from django.core.management.base import BaseCommand
+from django.core.files import File
 from django.utils import timezone
 from django.utils.text import slugify
 from django.contrib.auth import get_user_model
+from django.conf import settings
 
 # ── adjust this import path to match your actual app label ──────────────────
 from core.models import (
@@ -27,6 +38,48 @@ from core.models import (
 )
 
 User = get_user_model()
+
+# ────────────────────────────────────────────────────────────────────────────
+# File-picker helpers
+# ────────────────────────────────────────────────────────────────────────────
+
+# Extensions we treat as images / videos
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+VIDEO_EXTENSIONS = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv"}
+
+# Default backup root – override with --media-root flag or env var BACKUP_ROOT
+DEFAULT_BACKUP_ROOT = os.environ.get(
+    "BACKUP_ROOT",
+    # Works on Windows native, Docker/WSL paths – adjust as needed
+    r"D:\static\admin\Backup",
+)
+
+
+def _collect_files(root: str, extensions: set) -> list[Path]:
+    """Recursively collect all files under *root* that match *extensions*."""
+    root_path = Path(root)
+    if not root_path.exists():
+        return []
+    return [
+        p for p in root_path.rglob("*")
+        if p.is_file() and p.suffix.lower() in extensions
+    ]
+
+
+def _pick(file_list: list[Path]) -> Path | None:
+    """Return a random file from *file_list*, or None if empty."""
+    return random.choice(file_list) if file_list else None
+
+
+def _django_file(path: Path) -> File | None:
+    """Open a filesystem path as a Django File object."""
+    if path is None:
+        return None
+    try:
+        return File(open(path, "rb"), name=path.name)
+    except OSError:
+        return None
+
 
 # ────────────────────────────────────────────────────────────────────────────
 # Raw fixture data
@@ -289,6 +342,10 @@ COMMENTS_DATA = [
 ]
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# Management command
+# ────────────────────────────────────────────────────────────────────────────
+
 class Command(BaseCommand):
     help = "Seed the database with realistic demo data for all models."
 
@@ -298,8 +355,45 @@ class Command(BaseCommand):
             action="store_true",
             help="Delete all existing data before seeding.",
         )
+        parser.add_argument(
+            "--media-root",
+            type=str,
+            default=DEFAULT_BACKUP_ROOT,
+            help=(
+                "Absolute path to the folder containing backup images/videos. "
+                f"Default: {DEFAULT_BACKUP_ROOT}"
+            ),
+        )
 
     def handle(self, *args, **options):
+        backup_root = options["media_root"]
+
+        # ── Collect available files once, reuse everywhere ──────────────────
+        self.stdout.write(f"  📂 Scanning backup folder: {backup_root}")
+        self.images = _collect_files(backup_root, IMAGE_EXTENSIONS)
+        self.videos_files = _collect_files(backup_root, VIDEO_EXTENSIONS)
+
+        if not self.images:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  ⚠  No images found in '{backup_root}'. "
+                    "Image fields will be left blank."
+                )
+            )
+        else:
+            self.stdout.write(f"  ✔  Found {len(self.images)} image(s)")
+
+        if not self.videos_files:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"  ⚠  No video files found in '{backup_root}'. "
+                    "video_file fields will be left blank."
+                )
+            )
+        else:
+            self.stdout.write(f"  ✔  Found {len(self.videos_files)} video file(s)")
+
+        # ── Optional wipe ───────────────────────────────────────────────────
         if options["clear"]:
             self._clear_all()
 
@@ -321,6 +415,31 @@ class Command(BaseCommand):
         self._seed_notifications(users)
 
         self.stdout.write(self.style.SUCCESS("\n✅  Seeding complete!\n"))
+
+    # ── Helpers ──────────────────────────────────────────────────────────────
+
+    def _rand_image(self) -> File | None:
+        """Return a random image as a Django File, or None."""
+        return _django_file(_pick(self.images))
+
+    def _rand_video(self) -> File | None:
+        """Return a random video file as a Django File, or None."""
+        return _django_file(_pick(self.videos_files))
+
+    def _assign_image_field(self, instance, field_name: str) -> None:
+        """
+        Save a random image into *field_name* on *instance* and persist it.
+        Skips silently if no images are available or the field is already set.
+        """
+        if not self.images:
+            return
+        current = getattr(instance, field_name)
+        if current:          # already has a file – skip
+            return
+        f = self._rand_image()
+        if f:
+            getattr(instance, field_name).save(f.name, f, save=True)
+            f.file.close()
 
     # ── Clear ────────────────────────────────────────────────────────────────
 
@@ -372,11 +491,14 @@ class Command(BaseCommand):
             )
             if new:
                 user.set_password(data["password"])
-                # date_of_birth must be set after creation
-                from datetime import date
                 y, m, d = data["date_of_birth"].split("-")
                 user.date_of_birth = date(int(y), int(m), int(d))
                 user.save()
+
+                # ── Assign random profile & cover photos ──────────────────
+                self._assign_image_field(user, "profile_photo")
+                self._assign_image_field(user, "cover_photo")
+
                 self.stdout.write(f"    Created user: {user.username}")
             else:
                 self.stdout.write(f"    Exists  user: {user.username}")
@@ -386,19 +508,27 @@ class Command(BaseCommand):
     # ── UserPhotos ───────────────────────────────────────────────────────────
 
     def _seed_user_photos(self, users):
-        self.stdout.write("  → Seeding UserPhotos (placeholder records)…")
+        self.stdout.write("  → Seeding UserPhotos…")
         captions = [
             "At the beach 🌊", "Hiking day 🏔️", "Coffee time ☕",
             "Night out 🌙", "Fitness mode 💪",
         ]
+        total = 0
         for user in users:
-            for i, caption in enumerate(captions[:3]):
-                UserPhoto.objects.get_or_create(
+            for caption in captions[:3]:
+                photo, new = UserPhoto.objects.get_or_create(
                     user=user,
                     caption=caption,
                     defaults={"is_public": True},
                 )
-        self.stdout.write(f"    Done.")
+                if new and self.images:
+                    # Save a random image into the gallery photo
+                    f = self._rand_image()
+                    if f:
+                        photo.image.save(f.name, f, save=True)
+                        f.file.close()
+                    total += 1
+        self.stdout.write(f"    {total} new gallery photos saved.")
 
     # ── Categories ───────────────────────────────────────────────────────────
 
@@ -427,7 +557,7 @@ class Command(BaseCommand):
         self.stdout.write("  → Seeding Tags…")
         created = []
         for name in TAGS_DATA:
-            tag, new = Tag.objects.get_or_create(
+            tag, _ = Tag.objects.get_or_create(
                 slug=slugify(name),
                 defaults={"name": name},
             )
@@ -468,8 +598,23 @@ class Command(BaseCommand):
                 },
             )
             if new:
-                # Assign random tags (2–5)
                 video.tags.set(random.sample(tags, k=random.randint(2, 5)))
+
+                # ── Random thumbnail (image) ──────────────────────────────
+                if self.images:
+                    f = self._rand_image()
+                    if f:
+                        video.thumbnail.save(f.name, f, save=False)
+                        f.file.close()
+
+                # ── Random video file ─────────────────────────────────────
+                if self.videos_files:
+                    f = self._rand_video()
+                    if f:
+                        video.video_file.save(f.name, f, save=False)
+                        f.file.close()
+
+                video.save()
                 self.stdout.write(f"    Created video: {video.title}")
             created.append(video)
         return created
@@ -487,24 +632,30 @@ class Command(BaseCommand):
             stream, new = LiveStream.objects.get_or_create(
                 slug=slug,
                 defaults={
-                    "id":             ls_id,
-                    "host":           host,
-                    "title":          data["title"],
-                    "description":    data["description"],
-                    "status":         data["status"],
-                    "access_price":   decimal.Decimal(data["access_price"]),
-                    "viewers_count":  random.randint(0, 800),
-                    "stream_key":     uuid.uuid4().hex,
-                    "stream_url":     f"https://stream.example.com/live/{ls_id.hex[:12]}",
-                    "meta_title":     data["title"][:160],
+                    "id":               ls_id,
+                    "host":             host,
+                    "title":            data["title"],
+                    "description":      data["description"],
+                    "status":           data["status"],
+                    "access_price":     decimal.Decimal(data["access_price"]),
+                    "viewers_count":    random.randint(0, 800),
+                    "stream_key":       uuid.uuid4().hex,
+                    "stream_url":       f"https://stream.example.com/live/{ls_id.hex[:12]}",
+                    "meta_title":       data["title"][:160],
                     "meta_description": data["description"][:300],
-                    "started_at":     timezone.now() - timedelta(hours=random.randint(1, 24))
-                                      if data["status"] in ("live", "ended") else None,
-                    "ended_at":       timezone.now() - timedelta(minutes=random.randint(5, 120))
-                                      if data["status"] == "ended" else None,
+                    "started_at":       timezone.now() - timedelta(hours=random.randint(1, 24))
+                                        if data["status"] in ("live", "ended") else None,
+                    "ended_at":         timezone.now() - timedelta(minutes=random.randint(5, 120))
+                                        if data["status"] == "ended" else None,
                 },
             )
             if new:
+                # ── Random stream thumbnail ───────────────────────────────
+                if self.images:
+                    f = self._rand_image()
+                    if f:
+                        stream.thumbnail.save(f.name, f, save=True)
+                        f.file.close()
                 self.stdout.write(f"    Created stream: {stream.title}")
             created.append(stream)
         return created
@@ -514,16 +665,17 @@ class Command(BaseCommand):
     def _seed_video_interactions(self, users, videos):
         self.stdout.write("  → Seeding VideoViews & VideoLikes…")
         for video in videos:
-            # Views
             for user in random.sample(users, k=random.randint(2, len(users))):
                 VideoView.objects.get_or_create(video=video, viewer=user)
-            # Anonymous views
             for _ in range(random.randint(3, 10)):
                 VideoView.objects.create(
                     video=video,
-                    ip_address=f"197.{random.randint(1,254)}.{random.randint(1,254)}.{random.randint(1,254)}",
+                    ip_address=(
+                        f"197.{random.randint(1,254)}"
+                        f".{random.randint(1,254)}"
+                        f".{random.randint(1,254)}"
+                    ),
                 )
-            # Likes
             for user in random.sample(users, k=random.randint(1, len(users))):
                 VideoLike.objects.get_or_create(video=video, user=user)
         self.stdout.write("    Done.")
@@ -534,7 +686,6 @@ class Command(BaseCommand):
         self.stdout.write("  → Seeding Comments…")
         total = 0
         for video in videos:
-            # Top-level comments
             top_comments = []
             for _ in range(random.randint(2, 5)):
                 c = Comment.objects.create(
@@ -545,7 +696,6 @@ class Command(BaseCommand):
                 )
                 top_comments.append(c)
                 total += 1
-            # Replies
             for parent in top_comments[:2]:
                 Comment.objects.create(
                     video=video,
@@ -562,20 +712,16 @@ class Command(BaseCommand):
     def _seed_matches(self, users):
         self.stdout.write("  → Seeding Matches…")
         statuses = ["pending", "accepted", "rejected"]
-        pairs    = []
+        total    = 0
         for i, sender in enumerate(users):
             for receiver in users[i + 1:]:
-                pairs.append((sender, receiver))
-
-        total = 0
-        for sender, receiver in pairs:
-            _, new = Match.objects.get_or_create(
-                sender=sender,
-                receiver=receiver,
-                defaults={"status": random.choice(statuses)},
-            )
-            if new:
-                total += 1
+                _, new = Match.objects.get_or_create(
+                    sender=sender,
+                    receiver=receiver,
+                    defaults={"status": random.choice(statuses)},
+                )
+                if new:
+                    total += 1
         self.stdout.write(f"    {total} matches created.")
 
     # ── Conversations & Messages ──────────────────────────────────────────────
@@ -583,7 +729,11 @@ class Command(BaseCommand):
     def _seed_conversations(self, users):
         self.stdout.write("  → Seeding Conversations…")
         convs = []
-        pairs = [(users[i], users[j]) for i in range(len(users)) for j in range(i + 1, len(users))]
+        pairs = [
+            (users[i], users[j])
+            for i in range(len(users))
+            for j in range(i + 1, len(users))
+        ]
         for u1, u2 in pairs:
             conv = Conversation.objects.create()
             conv.participants.set([u1, u2])
@@ -610,13 +760,19 @@ class Command(BaseCommand):
             participants = [u1, u2]
             for _ in range(random.randint(3, 8)):
                 sender = random.choice(participants)
-                Message.objects.create(
+                msg = Message.objects.create(
                     conversation=conv,
                     sender=sender,
                     body=random.choice(sample_texts),
                     is_read=random.choice([True, False]),
                     created_at=timezone.now() - timedelta(minutes=random.randint(1, 10000)),
                 )
+                # Occasionally attach a random image to the message
+                if self.images and random.random() < 0.25:
+                    f = self._rand_image()
+                    if f:
+                        msg.photo.save(f.name, f, save=True)
+                        f.file.close()
                 total += 1
         self.stdout.write(f"    {total} messages created.")
 
@@ -631,7 +787,6 @@ class Command(BaseCommand):
         payments     = []
 
         for user in users:
-            # Video purchases
             for video in paid_videos:
                 p = Payment.objects.create(
                     user=user,
@@ -641,12 +796,13 @@ class Command(BaseCommand):
                     status="success",
                     video=video,
                     gateway_reference=f"REF-{uuid.uuid4().hex[:12].upper()}",
-                    mpesa_receipt=f"QGH{random.randint(100000, 999999)}XYZ"
-                                  if random.random() > 0.5 else "",
+                    mpesa_receipt=(
+                        f"QGH{random.randint(100000, 999999)}XYZ"
+                        if random.random() > 0.5 else ""
+                    ),
                 )
                 payments.append(p)
 
-            # Stream purchases
             for stream in paid_streams:
                 p = Payment.objects.create(
                     user=user,
@@ -659,7 +815,6 @@ class Command(BaseCommand):
                 )
                 payments.append(p)
 
-            # Premium upgrade payment
             Payment.objects.create(
                 user=user,
                 amount=decimal.Decimal("999.00"),
@@ -684,7 +839,9 @@ class Command(BaseCommand):
         va_count = 0
         for user in users:
             for video in paid_videos:
-                payment = Payment.objects.filter(user=user, video=video, status="success").first()
+                payment = Payment.objects.filter(
+                    user=user, video=video, status="success"
+                ).first()
                 if payment:
                     _, new = VideoAccess.objects.get_or_create(
                         user=user, video=video,
@@ -696,7 +853,9 @@ class Command(BaseCommand):
         sa_count = 0
         for user in users:
             for stream in paid_streams:
-                payment = Payment.objects.filter(user=user, live_stream=stream, status="success").first()
+                payment = Payment.objects.filter(
+                    user=user, live_stream=stream, status="success"
+                ).first()
                 if payment:
                     _, new = StreamAccess.objects.get_or_create(
                         user=user, stream=stream,
@@ -705,7 +864,9 @@ class Command(BaseCommand):
                     if new:
                         sa_count += 1
 
-        self.stdout.write(f"    {va_count} VideoAccess, {sa_count} StreamAccess grants created.")
+        self.stdout.write(
+            f"    {va_count} VideoAccess, {sa_count} StreamAccess grants created."
+        )
 
     # ── Notifications ─────────────────────────────────────────────────────────
 
@@ -728,9 +889,13 @@ class Command(BaseCommand):
                     recipient=user,
                     actor=actor,
                     notif_type=notif_type,
-                    message=template.format(actor=actor.get_full_name() if actor else "Someone"),
+                    message=template.format(
+                        actor=actor.get_full_name() if actor else "Someone"
+                    ),
                     is_read=random.choice([True, False]),
-                    created_at=timezone.now() - timedelta(minutes=random.randint(1, 7200)),
+                    created_at=timezone.now() - timedelta(
+                        minutes=random.randint(1, 7200)
+                    ),
                 )
                 total += 1
         self.stdout.write(f"    {total} notifications created.")

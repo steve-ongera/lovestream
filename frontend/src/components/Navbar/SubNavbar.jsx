@@ -3,13 +3,15 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { api } from "../../services/api";
 
 function CategoriesDropdown() {
-  const [open, setOpen]         = useState(false);
+  const [open, setOpen]             = useState(false);
   const [categories, setCategories] = useState([]);
-  const ref = useRef();
-  const navigate = useNavigate();
+  const ref                         = useRef();
+  const navigate                    = useNavigate();
 
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
@@ -26,26 +28,40 @@ function CategoriesDropdown() {
 
   return (
     <div className="ls-subnav__dropdown" ref={ref}>
-      <button className="ls-subnav__link ls-subnav__link--btn" onClick={handleOpen}>
-        <i className="bi bi-grid-fill" /> Categories
+      <button
+        className="ls-subnav__link ls-subnav__link--btn"
+        onClick={handleOpen}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+      >
+        <i className="bi bi-grid-fill" />
+        <span>Categories</span>
         <i className={`bi bi-chevron-${open ? "up" : "down"} ls-subnav__chevron`} />
       </button>
+
       {open && (
-        <div className="ls-subnav__dropdown-menu">
-          {categories.length === 0 && (
+        <div className="ls-subnav__dropdown-menu" role="listbox">
+          {categories.length === 0 ? (
             <div className="ls-subnav__dd-empty">
-              <i className="bi bi-hourglass-split" /> Loading…
+              <i className="bi bi-hourglass-split" />
+              <span>Loading…</span>
             </div>
+          ) : (
+            categories.map((cat) => (
+              <button
+                key={cat.slug}
+                className="ls-subnav__dd-item"
+                role="option"
+                onClick={() => {
+                  navigate(`/videos?category=${cat.slug}`);
+                  setOpen(false);
+                }}
+              >
+                {cat.icon && <i className={`bi ${cat.icon}`} />}
+                <span>{cat.name}</span>
+              </button>
+            ))
           )}
-          {categories.map((cat) => (
-            <button
-              key={cat.slug}
-              className="ls-subnav__dd-item"
-              onClick={() => { navigate(`/videos?category=${cat.slug}`); setOpen(false); }}
-            >
-              {cat.icon && <i className={`bi ${cat.icon}`} />} {cat.name}
-            </button>
-          ))}
         </div>
       )}
     </div>
@@ -53,10 +69,10 @@ function CategoriesDropdown() {
 }
 
 const NAV_LINKS = [
-  { to: "/",           label: "Best Videos",    icon: "bi-fire",              exact: true },
-  { to: "/live",       label: "Live Camera",    icon: "bi-broadcast-pin"                  },
-  { to: "/dating",     label: "Dating",         icon: "bi-heart-arrow"                    },
-  { to: "/profile/me", label: "My Profile",     icon: "bi-person-badge-fill"              },
+  { to: "/",           label: "Best Videos",  icon: "bi-fire",             exact: true },
+  { to: "/live",       label: "Live Camera",  icon: "bi-broadcast-pin"                 },
+  { to: "/dating",     label: "Dating",       icon: "bi-heart-arrow"                   },
+  { to: "/profile/me", label: "My Profile",   icon: "bi-person-badge-fill"             },
 ];
 
 export default function SubNavbar() {
@@ -64,6 +80,7 @@ export default function SubNavbar() {
     <nav className="ls-subnav" aria-label="Section navigation">
       <div className="ls-subnav__inner">
 
+        {/* Primary nav links */}
         {NAV_LINKS.map(({ to, label, icon, exact }) => (
           <NavLink
             key={to}
@@ -78,7 +95,7 @@ export default function SubNavbar() {
           </NavLink>
         ))}
 
-        {/* Red Videos (special accent) */}
+        {/* Red Videos — accent link */}
         <NavLink
           to="/videos?featured=true"
           className={({ isActive }) =>
@@ -89,7 +106,7 @@ export default function SubNavbar() {
           <span>Red Videos</span>
         </NavLink>
 
-        {/* Categories dropdown */}
+        {/* Categories flyout */}
         <CategoriesDropdown />
       </div>
     </nav>
