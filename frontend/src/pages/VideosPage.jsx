@@ -4,29 +4,28 @@ import { api } from "../services/api";
 import VideoCard from "../components/VideoCard";
 
 const SORT_OPTIONS = [
-  { value: "-created_at",  label: "Newest" },
-  { value: "-views_count", label: "Most Viewed" },
-  { value: "-likes_count", label: "Most Liked" },
-  { value: "price",        label: "Price ↑" },
+  { value: "-created_at",  label: "Newest"      },
+  { value: "-views_count", label: "Most Viewed"  },
+  { value: "-likes_count", label: "Most Liked"   },
+  { value: "price",        label: "Price ↑"      },
 ];
 
 export default function VideosPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [videos, setVideos]           = useState([]);
-  const [categories, setCategories]   = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [totalPages, setTotalPages]   = useState(1);
-  const [totalCount, setTotalCount]   = useState(0);
+  const [videos, setVideos]         = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
-  const page        = Number(searchParams.get("page")        || 1);
-  const search      = searchParams.get("search")      || "";
-  const category    = searchParams.get("category")    || "";
-  const accessType  = searchParams.get("access_type") || "";
-  const featured    = searchParams.get("featured")    || "";
-  const ordering    = searchParams.get("ordering")    || "-created_at";
+  const page       = Number(searchParams.get("page")        || 1);
+  const search     = searchParams.get("search")      || "";
+  const category   = searchParams.get("category")    || "";
+  const accessType = searchParams.get("access_type") || "";
+  const featured   = searchParams.get("featured")    || "";
+  const ordering   = searchParams.get("ordering")    || "-created_at";
 
-  // Load categories once
   useEffect(() => {
     api.getCategories()
       .then((d) => setCategories(d.results || d))
@@ -68,78 +67,129 @@ export default function VideosPage() {
   };
 
   return (
-    <div className="ls-videos-page">
-      {/* ── Filter Bar ──────────────────────────────────────── */}
-      <div className="ls-filter-bar">
-        <div className="ls-filter-bar__inner">
+    <div className="ls-main">
 
-          {/* Access type */}
-          <div className="ls-filter-group">
-            {["", "free", "paid"].map((val) => (
+      {/* ── Filter bar ────────────────────────────────────────────── */}
+      <div
+        style={{
+          background: "var(--white)",
+          borderBottom: "1px solid var(--stone-200)",
+          padding: "var(--sp-3) var(--content-pad)",
+          position: "sticky",
+          top: "calc(var(--navbar-h) + var(--subnav-h))",
+          zIndex: 100,
+        }}
+      >
+        <div
+          style={{
+            maxWidth: "var(--max-w)",
+            marginInline: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--sp-3)",
+            flexWrap: "wrap",
+          }}
+        >
+          {/* Access type toggle group */}
+          <div
+            style={{
+              display: "flex",
+              gap: 2,
+              background: "var(--stone-100)",
+              borderRadius: "var(--r-full)",
+              padding: 3,
+            }}
+          >
+            {[
+              { val: "",     icon: "bi-grid",         label: "All"     },
+              { val: "free", icon: "bi-unlock-fill",  label: "Free"    },
+              { val: "paid", icon: "bi-gem",          label: "Premium" },
+            ].map(({ val, icon, label }) => (
               <button
                 key={val}
-                className={`ls-filter-btn${accessType === val ? " ls-filter-btn--active" : ""}`}
                 onClick={() => update("access_type", val)}
+                className={accessType === val ? "ls-btn ls-btn--primary ls-btn--sm" : "ls-btn ls-btn--ghost ls-btn--sm"}
+                style={{ borderRadius: "var(--r-full)" }}
               >
-                {val === ""     && <><i className="bi bi-grid" /> All</>}
-                {val === "free" && <><i className="bi bi-unlock-fill" /> Free</>}
-                {val === "paid" && <><i className="bi bi-gem" /> Premium</>}
+                <i className={`bi ${icon}`} /> {label}
               </button>
             ))}
           </div>
 
           {/* Category select */}
-          <select
-            className="ls-select"
-            value={category}
-            onChange={(e) => update("category", e.target.value)}
-          >
-            <option value="">All Categories</option>
-            {categories.map((c) => (
-              <option key={c.slug} value={c.slug}>{c.name}</option>
-            ))}
-          </select>
+          <div className="ls-input-wrap" style={{ minWidth: 160 }}>
+            <i className="bi bi-grid-fill ls-input-wrap__icon" style={{ fontSize: 13 }} />
+            <select
+              className="ls-input ls-select ls-input--icon-left"
+              style={{ paddingBlock: 8, height: "auto" }}
+              value={category}
+              onChange={(e) => update("category", e.target.value)}
+            >
+              <option value="">All Categories</option>
+              {categories.map((c) => (
+                <option key={c.slug} value={c.slug}>{c.name}</option>
+              ))}
+            </select>
+          </div>
 
-          {/* Sort */}
-          <select
-            className="ls-select"
-            value={ordering}
-            onChange={(e) => update("ordering", e.target.value)}
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
+          {/* Sort select */}
+          <div className="ls-input-wrap" style={{ minWidth: 150 }}>
+            <i className="bi bi-sort-down ls-input-wrap__icon" style={{ fontSize: 13 }} />
+            <select
+              className="ls-input ls-select ls-input--icon-left"
+              style={{ paddingBlock: 8, height: "auto" }}
+              value={ordering}
+              onChange={(e) => update("ordering", e.target.value)}
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
 
           {/* Results count */}
           {!loading && (
-            <span className="ls-filter-count">
+            <span
+              className="ls-badge ls-badge--dark"
+              style={{ marginLeft: "auto" }}
+            >
               {totalCount.toLocaleString()} video{totalCount !== 1 ? "s" : ""}
             </span>
           )}
         </div>
       </div>
 
-      {/* ── Active search label ──────────────────────────────── */}
+      {/* ── Active search label ───────────────────────────────────── */}
       {search && (
-        <div className="ls-container" style={{ paddingTop: 20 }}>
-          <div className="ls-search-label">
+        <div
+          className="ls-container"
+          style={{ paddingTop: "var(--sp-5)" }}
+        >
+          <div
+            className="ls-alert ls-alert--info"
+            style={{ display: "inline-flex", gap: "var(--sp-3)", alignItems: "center" }}
+          >
             <i className="bi bi-search" />
             Results for <strong>"{search}"</strong>
-            <button onClick={() => update("search", "")} className="ls-search-label__clear">
+            <button
+              className="ls-btn ls-btn--ghost ls-btn--xs ls-btn--icon"
+              onClick={() => update("search", "")}
+              aria-label="Clear search"
+            >
               <i className="bi bi-x-circle-fill" />
             </button>
           </div>
         </div>
       )}
 
-      {/* ── Grid ────────────────────────────────────────────── */}
+      {/* ── Grid ──────────────────────────────────────────────────── */}
       {loading ? (
         <SkeletonGrid />
       ) : videos.length === 0 ? (
-        <div className="ls-empty" style={{ padding: "80px 20px" }}>
-          <i className="bi bi-film" />
-          <p>No videos found. Try adjusting your filters.</p>
+        <div className="ls-empty" style={{ padding: "var(--sp-20) var(--sp-5)" }}>
+          <i className="bi bi-film ls-empty__icon" />
+          <h3>No videos found</h3>
+          <p>Try adjusting your filters or search query.</p>
         </div>
       ) : (
         <div className="ls-video-grid">
@@ -147,7 +197,7 @@ export default function VideosPage() {
         </div>
       )}
 
-      {/* ── Pagination ──────────────────────────────────────── */}
+      {/* ── Pagination ────────────────────────────────────────────── */}
       {!loading && totalPages > 1 && (
         <Pagination current={page} total={totalPages} onChange={setPage} />
       )}
@@ -155,23 +205,32 @@ export default function VideosPage() {
   );
 }
 
+/* ── Pagination ───────────────────────────────────────────────────────────── */
 function Pagination({ current, total, onChange }) {
   const pages = [];
   const delta = 2;
   for (let i = Math.max(1, current - delta); i <= Math.min(total, current + delta); i++) {
     pages.push(i);
   }
+
   return (
     <div className="ls-pagination">
-      <button className="ls-page-btn" disabled={current === 1} onClick={() => onChange(current - 1)}>
+      <button
+        className="ls-page-btn"
+        disabled={current === 1}
+        onClick={() => onChange(current - 1)}
+        aria-label="Previous page"
+      >
         <i className="bi bi-chevron-left" />
       </button>
+
       {pages[0] > 1 && (
         <>
           <button className="ls-page-btn" onClick={() => onChange(1)}>1</button>
-          {pages[0] > 2 && <span className="ls-page-ellipsis">…</span>}
+          {pages[0] > 2 && <span className="ls-page-btn ls-page-btn--dots">…</span>}
         </>
       )}
+
       {pages.map((p) => (
         <button
           key={p}
@@ -181,28 +240,49 @@ function Pagination({ current, total, onChange }) {
           {p}
         </button>
       ))}
+
       {pages[pages.length - 1] < total && (
         <>
-          {pages[pages.length - 1] < total - 1 && <span className="ls-page-ellipsis">…</span>}
+          {pages[pages.length - 1] < total - 1 && (
+            <span className="ls-page-btn ls-page-btn--dots">…</span>
+          )}
           <button className="ls-page-btn" onClick={() => onChange(total)}>{total}</button>
         </>
       )}
-      <button className="ls-page-btn" disabled={current === total} onClick={() => onChange(current + 1)}>
+
+      <button
+        className="ls-page-btn"
+        disabled={current === total}
+        onClick={() => onChange(current + 1)}
+        aria-label="Next page"
+      >
         <i className="bi bi-chevron-right" />
       </button>
     </div>
   );
 }
 
+/* ── Skeleton grid ────────────────────────────────────────────────────────── */
 function SkeletonGrid() {
   return (
     <div className="ls-video-grid">
       {Array.from({ length: 12 }).map((_, i) => (
-        <div key={i} className="ls-skeleton-card">
-          <div className="ls-skeleton ls-skeleton--thumb" />
-          <div style={{ padding: "12px" }}>
-            <div className="ls-skeleton ls-skeleton--line" style={{ width: "80%", marginBottom: 8 }} />
-            <div className="ls-skeleton ls-skeleton--line" style={{ width: "55%" }} />
+        <div
+          key={i}
+          style={{
+            borderRadius: "var(--r-lg)",
+            overflow: "hidden",
+            background: "var(--white)",
+            border: "1px solid var(--stone-100)",
+          }}
+        >
+          <div
+            className="ls-skeleton"
+            style={{ aspectRatio: "16/9", width: "100%" }}
+          />
+          <div style={{ padding: "var(--sp-3) var(--sp-4)" }}>
+            <div className="ls-skeleton" style={{ height: 14, width: "80%", marginBottom: "var(--sp-2)" }} />
+            <div className="ls-skeleton" style={{ height: 12, width: "55%" }} />
           </div>
         </div>
       ))}
